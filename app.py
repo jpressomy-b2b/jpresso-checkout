@@ -112,8 +112,8 @@ def create_checkout_session():
             "payment_method_types": ["card", "fpx"],  # Card + Malaysian FPX bank transfer!
             "line_items": line_items,
             "mode": "payment",
-            "success_url": "www.jpressocoffee.com/jpresso-subscribe.html?success=true",
-            "cancel_url": "www.jpressocoffee.com/jpresso-subscribe.html?cancelled=true",
+            "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true",
+          "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?cancelled=true",
             "shipping_address_collection": {
                 "allowed_countries": ["MY"],  # Malaysia only (add more if needed)
             },
@@ -198,8 +198,8 @@ def create_subscription_session():
             payment_method_types=["card", "fpx"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
-            success_url="www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
-            cancel_url="www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
+            "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true",
+            "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?cancelled=true",
         )
 
         return jsonify({"url": session.url})
