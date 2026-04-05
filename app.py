@@ -89,15 +89,15 @@ def create_checkout_session():
 @app.route("/create-subscription-session", methods=["POST"])
 def create_subscription_session():
     SUBSCRIPTION_PRICES = {
-        "so-weekly": "price_REPLACE_WITH_REAL_ID",
-        "so-biweekly": "price_REPLACE_WITH_REAL_ID",
-        "so-monthly": "price_REPLACE_WITH_REAL_ID",
-        "bl-weekly": "price_REPLACE_WITH_REAL_ID",
-        "bl-biweekly": "price_REPLACE_WITH_REAL_ID",
-        "bl-monthly": "price_REPLACE_WITH_REAL_ID",
-        "es-weekly": "price_REPLACE_WITH_REAL_ID",
-        "es-biweekly": "price_REPLACE_WITH_REAL_ID",
-        "es-monthly": "price_REPLACE_WITH_REAL_ID",
+        "so-weekly": "price_1TIjV3H2MTIbGDtxkUZGzvJ8",
+        "so-biweekly": "price_1TIjVrH2MTIbGDtx6OnJKT5L",
+        "so-monthly": "price_1TIjWYH2MTIbGDtxEuaUQJ0F",
+        "bl-weekly": "price_1TIjXIH2MTIbGDtxtII3MgHo",
+        "bl-biweekly": "price_1TIjXuH2MTIbGDtx46YZeUYy",
+        "bl-monthly": "price_1TIjYQH2MTIbGDtxtmILDSns",
+        "es-weekly": "price_1TIjZnH2MTIbGDtx3KF2OMBI",
+        "es-biweekly": "price_1TIj4OH2MTIbGDtxdYNttWzT",
+        "es-monthly": "price_1TIjaXH2MTIbGDtxcU468xU8",
     }
 
     try:
