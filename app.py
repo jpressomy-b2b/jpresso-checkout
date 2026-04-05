@@ -109,7 +109,7 @@ def create_checkout_session():
 
         # Create checkout session params
         session_params = {
-            "payment_method_types": ["card", "fpx"],  # Card + Malaysian FPX bank transfer!
+            "payment_method_types": ["card"],  # Card + Malaysian FPX bank transfer!
             "line_items": line_items,
             "mode": "payment",
             "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true",
@@ -195,7 +195,7 @@ def create_subscription_session():
             return jsonify({"error": f"Subscription '{plan_id}' not configured. Create the price in Stripe Dashboard first."}), 400
 
         session = stripe.checkout.Session.create(
-            payment_method_types=["card", "fpx"],
+            payment_method_types": ["card"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true",
