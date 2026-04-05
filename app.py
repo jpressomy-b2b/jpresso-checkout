@@ -195,7 +195,7 @@ def create_subscription_session():
             return jsonify({"error": f"Subscription '{plan_id}' not configured. Create the price in Stripe Dashboard first."}), 400
 
         session = stripe.checkout.Session.create(
-            payment_method_types": ["card"],
+            "payment_method_types": ["card"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="subscription",
             "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true",
