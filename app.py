@@ -210,7 +210,7 @@ def create_subscription_session():
             "mode": "subscription",
             "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
             "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
-            "customer_creation": "always",
+           
         }
 
         session = stripe.checkout.Session.create(**session_params)
