@@ -14,6 +14,13 @@ CORS(app, origins=[
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
+def get_or_create_customer(email):
+    customers = stripe.Customer.list(email=email, limit=1)
+    if customers.data:
+        return customers.data[0]
+    return stripe.Customer.create(email=email)
+
+
 def get_shipping_options(items):
     green_kg = 0
     has_non_green = False
@@ -29,8 +36,8 @@ def get_shipping_options(items):
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": 990, "currency": "myr"},
-                    "display_name": "Peninsular MY",
+                    "fixed_amount": {"amount": 0, "currency": "myr"},
+                    "display_name": "Free Shipping (Peninsular MY)",
                     "delivery_estimate": {
                         "minimum": {"unit": "business_day", "value": 3},
                         "maximum": {"unit": "business_day", "value": 5},
@@ -161,7 +168,10 @@ def create_checkout_session():
         }
 
         if customer_email:
-            session_params["customer_email"] = customer_email
+            customer = get_or_create_customer(customer_email)
+            session_params["customer"] = customer.id
+        else:
+            session_params["customer_creation"] = "always"
 
         session = stripe.checkout.Session.create(**session_params)
         return jsonify({"url": session.url})
@@ -194,16 +204,47 @@ def create_subscription_session():
         if not price_id or "REPLACE" in price_id:
             return jsonify({"error": f"Subscription '{plan_id}' not configured. Create the price in Stripe Dashboard first."}), 400
 
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{"price": price_id, "quantity": 1}],
-            mode="subscription",
-            success_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
-            cancel_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
+        session_params = {
+            "payment_method_types": ["card"],
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "mode": "subscription",
+            "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
+            "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
+            "customer_creation": "always",
+        }
+
+        session = stripe.checkout.Session.create(**session_params)
+        return jsonify({"url": session.url})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/create-portal-session", methods=["POST"])
+def create_portal_session():
+    try:
+        data = request.get_json()
+        email = data.get("email", "").strip().lower()
+
+        if not email:
+            return jsonify({"error": "Please enter your email address"}), 400
+
+        customers = stripe.Customer.list(email=email, limit=1)
+
+        if not customers.data:
+            return jsonify({"error": "No account found with this email. Please check your email or make a purchase first."}), 404
+
+        customer = customers.data[0]
+
+        session = stripe.billing_portal.Session.create(
+            customer=customer.id,
+            return_url="https://www.jpressocoffee.com/jpresso-subscribe.html",
         )
 
         return jsonify({"url": session.url})
 
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
