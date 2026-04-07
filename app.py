@@ -14,6 +14,113 @@ CORS(app, origins=[
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
+def get_shipping_options(items):
+    green_kg = 0
+    has_non_green = False
+
+    for item in items:
+        if item.get("type") == "green":
+            green_kg += item.get("quantity", 1)
+        else:
+            has_non_green = True
+
+    if green_kg == 0:
+        return [
+            {
+                "shipping_rate_data": {
+                    "type": "fixed_amount",
+                    "fixed_amount": {"amount": 0, "currency": "myr"},
+                    "display_name": "Free Shipping (Peninsular MY)",
+                    "delivery_estimate": {
+                        "minimum": {"unit": "business_day", "value": 3},
+                        "maximum": {"unit": "business_day", "value": 5},
+                    },
+                },
+            },
+            {
+                "shipping_rate_data": {
+                    "type": "fixed_amount",
+                    "fixed_amount": {"amount": 1500, "currency": "myr"},
+                    "display_name": "East Malaysia (Sabah & Sarawak) - RM15",
+                    "delivery_estimate": {
+                        "minimum": {"unit": "business_day", "value": 5},
+                        "maximum": {"unit": "business_day", "value": 10},
+                    },
+                },
+            },
+        ]
+
+    if green_kg >= 60:
+        pen_amount = 0
+        pen_label = f"Free Shipping (Peninsular MY) - {green_kg}kg"
+    elif green_kg >= 30:
+        pen_amount = 6000
+        pen_label = f"Peninsular MY - RM60 ({green_kg}kg)"
+    elif green_kg >= 10:
+        pen_amount = 4000
+        pen_label = f"Peninsular MY - RM40 ({green_kg}kg)"
+    elif green_kg >= 5:
+        pen_amount = 2500
+        pen_label = f"Peninsular MY - RM25 ({green_kg}kg)"
+    else:
+        pen_amount = 1500
+        pen_label = f"Peninsular MY - RM15 ({green_kg}kg)"
+
+    options = [
+        {
+            "shipping_rate_data": {
+                "type": "fixed_amount",
+                "fixed_amount": {"amount": pen_amount, "currency": "myr"},
+                "display_name": pen_label,
+                "delivery_estimate": {
+                    "minimum": {"unit": "business_day", "value": 3},
+                    "maximum": {"unit": "business_day", "value": 7},
+                },
+            },
+        },
+    ]
+
+    if green_kg < 30:
+        if green_kg >= 10:
+            em_amount = 15000
+            em_label = f"East Malaysia - RM150 ({green_kg}kg)"
+        elif green_kg >= 5:
+            em_amount = 8000
+            em_label = f"East Malaysia - RM80 ({green_kg}kg)"
+        else:
+            em_amount = 5000
+            em_label = f"East Malaysia - RM50 ({green_kg}kg)"
+
+        options.append({
+            "shipping_rate_data": {
+                "type": "fixed_amount",
+                "fixed_amount": {"amount": em_amount, "currency": "myr"},
+                "display_name": em_label,
+                "delivery_estimate": {
+                    "minimum": {"unit": "business_day", "value": 5},
+                    "maximum": {"unit": "business_day", "value": 10},
+                },
+            },
+        })
+    else:
+        options.append({
+            "shipping_rate_data": {
+                "type": "fixed_amount",
+                "fixed_amount": {"amount": 0, "currency": "myr"},
+                "display_name": "East Malaysia (30kg+) - Contact us for quote",
+                "delivery_estimate": {
+                    "minimum": {"unit": "business_day", "value": 7},
+                    "maximum": {"unit": "business_day", "value": 14},
+                },
+            },
+        })
+
+    if has_non_green:
+        options[0]["shipping_rate_data"]["display_name"] += " + roasted/equipment"
+
+    return options
+
+
 @app.route("/create-checkout-session", methods=["POST"])
 def create_checkout_session():
     try:
@@ -39,6 +146,8 @@ def create_checkout_session():
                 "quantity": item["quantity"],
             })
 
+        shipping_options = get_shipping_options(items)
+
         session_params = {
             "payment_method_types": ["card"],
             "line_items": line_items,
@@ -48,30 +157,7 @@ def create_checkout_session():
             "shipping_address_collection": {
                 "allowed_countries": ["MY"],
             },
-            "shipping_options": [
-                {
-                    "shipping_rate_data": {
-                        "type": "fixed_amount",
-                        "fixed_amount": {"amount": 990, "currency": "myr"},
-                        "display_name": "Peninsular MY",
-                        "delivery_estimate": {
-                            "minimum": {"unit": "business_day", "value": 3},
-                            "maximum": {"unit": "business_day", "value": 5},
-                        },
-                    },
-                },
-                {
-                    "shipping_rate_data": {
-                        "type": "fixed_amount",
-                        "fixed_amount": {"amount": 1500, "currency": "myr"},
-                        "display_name": "East Malaysia (Sabah & Sarawak)",
-                        "delivery_estimate": {
-                            "minimum": {"unit": "business_day", "value": 5},
-                            "maximum": {"unit": "business_day", "value": 10},
-                        },
-                    },
-                },
-            ],
+            "shipping_options": shipping_options,
         }
 
         if customer_email:
