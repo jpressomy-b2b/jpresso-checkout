@@ -36,8 +36,8 @@ def get_shipping_options(items):
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": 0, "currency": "myr"},
-                    "display_name": "Free Shipping (Peninsular MY)",
+                    "fixed_amount": {"amount": 990, "currency": "myr"},
+                    "display_name": "Peninsular MY",
                     "delivery_estimate": {
                         "minimum": {"unit": "business_day", "value": 3},
                         "maximum": {"unit": "business_day", "value": 5},
