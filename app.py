@@ -208,7 +208,7 @@ def create_subscription_session():
             return jsonify({"error": f"No price configured for {key}"}), 400
 
         session = stripe.checkout.Session.create(
-            payment_method_types=["card", "fpx"],
+           payment_method_types=["card"],
             mode="subscription",
             line_items=[{
                 "price": price_id,
