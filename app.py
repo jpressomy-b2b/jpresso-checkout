@@ -13,6 +13,15 @@ CORS(app, origins=[
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
+SUBSCRIPTION_PRICES = {
+    "Jpresso Roastery-filter": "price_1TKZxiH2MTIbGDtxNVgrDrQo",
+    "Jpresso Roastery-espresso": "price_1TKZouH2MTIbGDtxxyvt1nzo",
+    "LewisGene-filter": "price_1TKZpSH2MTIbGDtxyZPUXFia",
+    "LewisGene-espresso": "price_1TKZq1H2MTIbGDtxYAS2vyRh",
+    "Richman-filter": "price_1TKZqXH2MTIbGDtxcRKapyVG",
+    "Richman-espresso": "price_1TKZr8H2MTIbGDtx8NXxjwbS",
+}
+
 
 def get_or_create_customer(email):
     customers = stripe.Customer.list(email=email, limit=1)
@@ -184,39 +193,44 @@ def create_checkout_session():
 
 @app.route("/create-subscription-session", methods=["POST"])
 def create_subscription_session():
-    SUBSCRIPTION_PRICES = {
-        "so-weekly": "price_1TIjV3H2MTIbGDtxkUZGzvJ8",
-        "so-biweekly": "price_1TIjVrH2MTIbGDtx6OnJKT5L",
-        "so-monthly": "price_1TIjWYH2MTIbGDtxEuaUQJ0F",
-        "bl-weekly": "price_1TIjXIH2MTIbGDtxtII3MgHo",
-        "bl-biweekly": "price_1TIjXuH2MTIbGDtx46YZeUYy",
-        "bl-monthly": "price_1TIjYQH2MTIbGDtxtmILDSns",
-        "es-weekly": "price_1TIjZnH2MTIbGDtx3KF2OMBI",
-        "es-biweekly": "price_1TIj4OH2MTIbGDtxdYNttWzT",
-        "es-monthly": "price_1TIjaXH2MTIbGDtxcU468xU8",
-    }
-
     try:
         data = request.get_json()
-        plan_id = data.get("plan_id")
+        roastery = data.get("roastery", "Jpresso Roastery")
+        roast = data.get("roast", "filter")
+        duration = data.get("duration", "6m")
+        months = data.get("months", 6)
+        quantity = data.get("quantity", 1)
 
-        price_id = SUBSCRIPTION_PRICES.get(plan_id)
-        if not price_id or "REPLACE" in price_id:
-            return jsonify({"error": f"Subscription '{plan_id}' not configured. Create the price in Stripe Dashboard first."}), 400
+        key = f"{roastery}-{roast}"
+        price_id = SUBSCRIPTION_PRICES.get(key)
 
-        session_params = {
-            "payment_method_types": ["card"],
-            "line_items": [{"price": price_id, "quantity": 1}],
-            "mode": "subscription",
-            "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
-            "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
-           
-        }
+        if not price_id:
+            return jsonify({"error": f"No price configured for {key}"}), 400
 
-        session = stripe.checkout.Session.create(**session_params)
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card", "fpx"],
+            mode="subscription",
+            line_items=[{
+                "price": price_id,
+                "quantity": quantity,
+            }],
+            subscription_data={
+                "metadata": {
+                    "roastery": roastery,
+                    "roast": roast,
+                    "duration": duration,
+                    "months": str(months),
+                    "quantity": str(quantity),
+                },
+            },
+            success_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success",
+            cancel_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled",
+        )
+
         return jsonify({"url": session.url})
 
     except Exception as e:
+        print(f"Subscription error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
