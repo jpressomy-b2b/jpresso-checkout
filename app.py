@@ -31,7 +31,7 @@ RETURN_PAGE = f"{SITE_URL}/subscribe.html"
 
 def send_order_email(session_data):
     if not GMAIL_APP_PASSWORD:
-        print("[EMAIL] Skipped — GMAIL_APP_PASSWORD not set")
+        print("[EMAIL] Skipped - GMAIL_APP_PASSWORD not set")
         return
     try:
         sd = session_data.get("shipping_details") or {}
@@ -56,7 +56,7 @@ def send_order_email(session_data):
         except Exception:
             items_text = "  (Could not fetch items)\n"
 
-        subject = f"New Order #{order_id} — RM{amount:.2f} — {name}"
+        subject = f"New Order #{order_id} - RM{amount:.2f} - {name}"
 
         body_html = f"""
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#333">
@@ -64,33 +64,27 @@ def send_order_email(session_data):
 <h2 style="margin:0;font-size:18px;letter-spacing:2px">NEW ORDER RECEIVED</h2>
 </div>
 <div style="border:1px solid #e8dff0;border-top:none;padding:20px;border-radius:0 0 8px 8px">
-
 <table style="width:100%;font-size:14px;margin-bottom:16px">
 <tr><td style="color:#888;padding:4px 0">Order ID</td><td style="font-weight:700;color:#4E1F73">#{order_id}</td></tr>
 <tr><td style="color:#888;padding:4px 0">Date</td><td>{created}</td></tr>
 <tr><td style="color:#888;padding:4px 0">Type</td><td>{"Subscription" if mode == "subscription" else "One-time purchase"}</td></tr>
 <tr><td style="color:#888;padding:4px 0">Total</td><td style="font-weight:700;font-size:18px;color:#4E1F73">RM{amount:.2f}</td></tr>
 </table>
-
 <div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
 <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Customer</div>
 <div style="font-size:15px;font-weight:700;color:#4E1F73">{name}</div>
 <div style="font-size:13px">{email}</div>
 {f'<div style="font-size:13px">Tel: {phone}</div>' if phone else ''}
 </div>
-
 <div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
 <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Ship To</div>
 <div style="font-size:13px;line-height:1.6">{address_str or 'No address provided'}</div>
 </div>
-
 <div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
 <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Items Ordered</div>
 <pre style="font-family:Arial,sans-serif;font-size:13px;margin:0;white-space:pre-wrap">{items_text or '(No items)'}</pre>
 </div>
-
 <a href="{label_url}" style="display:inline-block;padding:12px 24px;background:#DAB07B;color:#2D1145;text-decoration:none;border-radius:6px;font-weight:700;font-size:13px;letter-spacing:1px">PRINT SHIPPING LABEL</a>
-
 <p style="font-size:11px;color:#999;margin-top:16px">This email was sent automatically by Bloom Daily. <a href="https://jpresso-checkout.onrender.com/admin?key={ADMIN_KEY}" style="color:#4E1F73">View all orders</a></p>
 </div>
 </div>"""
@@ -185,29 +179,92 @@ def create_checkout_session():
         return jsonify({"error": str(e)}), 500
 
 
+# Pricing for dynamic subscription creation
+# Base prices match frontend SUB_PRICES
+SUB_BASE_PRICES = {
+    "Jpresso Roastery": {"filter": {"base": 66, "disc": 0.05}, "espresso": {"base": 50, "disc": 0.10}},
+    "LewisGene": {"filter": {"base": 45, "disc": 0.10}, "espresso": {"base": 45, "disc": 0.10}},
+    "Richman": {"filter": {"base": 80, "disc": 0.10}, "espresso": {"base": 80, "disc": 0.10}},
+}
+
+
 @app.route("/create-subscription-session", methods=["POST"])
 def create_subscription_session():
-    SUBSCRIPTION_PRICES = {
-        "so-weekly": "price_1TIjV3H2MTIbGDtxkUZGzvJ8",
-        "so-biweekly": "price_1TIjVrH2MTIbGDtx6OnJKT5L",
-        "so-monthly": "price_1TIjWYH2MTIbGDtxEuaUQJ0F",
-        "bl-weekly": "price_1TIjXIH2MTIbGDtxtII3MgHo",
-        "bl-biweekly": "price_1TIjXuH2MTIbGDtx46YZeUYy",
-        "bl-monthly": "price_1TIjYQH2MTIbGDtxtmILDSns",
-        "es-weekly": "price_1TIjZnH2MTIbGDtx3KF2OMBI",
-        "es-biweekly": "price_1TIj4OH2MTIbGDtxdYNttWzT",
-        "es-monthly": "price_1TIjaXH2MTIbGDtxcU468xU8",
-    }
     try:
         data = request.get_json()
+
+        # New format: {roastery, roast, duration, months, quantity}
+        roastery = data.get("roastery")
+        roast = data.get("roast")
+        duration = data.get("duration", "6m")
+        months = data.get("months", 6)
+        quantity = int(data.get("quantity", 1))
+
+        # Legacy format support: {plan_id}
         plan_id = data.get("plan_id")
-        price_id = SUBSCRIPTION_PRICES.get(plan_id)
-        if not price_id or "REPLACE" in price_id:
-            return jsonify({"error": f"Subscription '{plan_id}' not configured."}), 400
-        session = stripe.checkout.Session.create(payment_method_types=["card"], line_items=[{"price": price_id, "quantity": 1}], mode="subscription", success_url=f"{RETURN_PAGE}?sub=success", cancel_url=f"{RETURN_PAGE}?sub=cancelled")
+        if plan_id and not roastery:
+            # Map old plan IDs to new format
+            legacy_map = {
+                "so-monthly": ("Jpresso Roastery", "filter"),
+                "es-monthly": ("Jpresso Roastery", "espresso"),
+                "bl-monthly": ("Jpresso Roastery", "filter"),
+            }
+            if plan_id in legacy_map:
+                roastery, roast = legacy_map[plan_id]
+                duration = "6m"
+                months = 6
+                quantity = 1
+
+        if not roastery or not roast:
+            return jsonify({"error": "Missing roastery or roast selection"}), 400
+
+        pricing = SUB_BASE_PRICES.get(roastery, {}).get(roast)
+        if not pricing:
+            return jsonify({"error": f"Pricing not configured for {roastery} {roast}"}), 400
+
+        # Calculate monthly price (with discount applied, rounded)
+        monthly_price = round(pricing["base"] * (1 - pricing["disc"]))
+        unit_amount = monthly_price * 100 * quantity  # in sen
+
+        # Build dynamic subscription product name
+        roast_label = "Filter Roast" if roast == "filter" else "Espresso Roast"
+        duration_label = {"3m": "3 Months", "6m": "6 Months", "12m": "12 Months"}.get(duration, f"{months} Months")
+        bags_label = f"{quantity} bag{'s' if quantity > 1 else ''} x 250g"
+        product_name = f"{roastery} - {roast_label} Subscription"
+        product_desc = f"{bags_label} per month, {duration_label} commitment"
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "myr",
+                    "unit_amount": unit_amount,
+                    "recurring": {"interval": "month"},
+                    "product_data": {
+                        "name": product_name,
+                        "description": product_desc,
+                    },
+                },
+                "quantity": 1,
+            }],
+            mode="subscription",
+            success_url=f"{RETURN_PAGE}?sub=success",
+            cancel_url=f"{RETURN_PAGE}?sub=cancelled",
+            subscription_data={
+                "metadata": {
+                    "roastery": roastery,
+                    "roast": roast,
+                    "duration": duration,
+                    "months": str(months),
+                    "quantity": str(quantity),
+                }
+            },
+        )
         return jsonify({"url": session.url})
+    except stripe.error.StripeError as e:
+        return jsonify({"error": f"Stripe error: {str(e)}"}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 
 @app.route("/create-portal-session", methods=["POST"])
