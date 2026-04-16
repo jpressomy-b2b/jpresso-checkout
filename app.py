@@ -3,10 +3,15 @@ from flask_cors import CORS
 import stripe
 import os
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 app = Flask(__name__)
 CORS(app, origins=[
+    "https://bloomdaily.io",
+    "https://www.bloomdaily.io",
     "https://jpressocoffee.com",
     "https://www.jpressocoffee.com",
     "http://localhost:3000",
@@ -16,6 +21,95 @@ CORS(app, origins=[
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "jpresso2026")
+GMAIL_USER = os.environ.get("GMAIL_USER", "jpresso.my@gmail.com")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL", "jpresso.my@gmail.com")
+
+SITE_URL = "https://bloomdaily.io"
+RETURN_PAGE = f"{SITE_URL}/subscribe.html"
+
+
+def send_order_email(session_data):
+    if not GMAIL_APP_PASSWORD:
+        print("[EMAIL] Skipped — GMAIL_APP_PASSWORD not set")
+        return
+    try:
+        sd = session_data.get("shipping_details") or {}
+        addr = sd.get("address", {}) if isinstance(sd, dict) else {}
+        cd = session_data.get("customer_details") or {}
+        name = sd.get("name", "") or cd.get("name", "Unknown")
+        email = cd.get("email", "")
+        phone = cd.get("phone", "")
+        amount = session_data.get("amount_total", 0) / 100
+        order_id = session_data.get("id", "")[-8:].upper()
+        created = datetime.fromtimestamp(session_data.get("created", 0)).strftime("%d %b %Y, %I:%M %p")
+        address_str = ", ".join(filter(None, [addr.get("line1", ""), addr.get("line2", ""), addr.get("postal_code", ""), addr.get("city", ""), addr.get("state", "")]))
+        mode = session_data.get("mode", "payment")
+        label_url = f"https://jpresso-checkout.onrender.com/admin/label/{session_data.get('id', '')}?key={ADMIN_KEY}"
+
+        items_text = ""
+        try:
+            full_session = stripe.checkout.Session.retrieve(session_data.get("id"), expand=["line_items"])
+            if full_session.line_items:
+                for li in full_session.line_items.data:
+                    items_text += f"  - {li.description} x{li.quantity} (RM{li.amount_total / 100:.2f})\n"
+        except Exception:
+            items_text = "  (Could not fetch items)\n"
+
+        subject = f"New Order #{order_id} — RM{amount:.2f} — {name}"
+
+        body_html = f"""
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#333">
+<div style="background:#4E1F73;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0">
+<h2 style="margin:0;font-size:18px;letter-spacing:2px">NEW ORDER RECEIVED</h2>
+</div>
+<div style="border:1px solid #e8dff0;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+
+<table style="width:100%;font-size:14px;margin-bottom:16px">
+<tr><td style="color:#888;padding:4px 0">Order ID</td><td style="font-weight:700;color:#4E1F73">#{order_id}</td></tr>
+<tr><td style="color:#888;padding:4px 0">Date</td><td>{created}</td></tr>
+<tr><td style="color:#888;padding:4px 0">Type</td><td>{"Subscription" if mode == "subscription" else "One-time purchase"}</td></tr>
+<tr><td style="color:#888;padding:4px 0">Total</td><td style="font-weight:700;font-size:18px;color:#4E1F73">RM{amount:.2f}</td></tr>
+</table>
+
+<div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
+<div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Customer</div>
+<div style="font-size:15px;font-weight:700;color:#4E1F73">{name}</div>
+<div style="font-size:13px">{email}</div>
+{f'<div style="font-size:13px">Tel: {phone}</div>' if phone else ''}
+</div>
+
+<div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
+<div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Ship To</div>
+<div style="font-size:13px;line-height:1.6">{address_str or 'No address provided'}</div>
+</div>
+
+<div style="background:#f8f5f1;border-radius:6px;padding:14px;margin-bottom:14px">
+<div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#999;margin-bottom:6px;font-weight:600">Items Ordered</div>
+<pre style="font-family:Arial,sans-serif;font-size:13px;margin:0;white-space:pre-wrap">{items_text or '(No items)'}</pre>
+</div>
+
+<a href="{label_url}" style="display:inline-block;padding:12px 24px;background:#DAB07B;color:#2D1145;text-decoration:none;border-radius:6px;font-weight:700;font-size:13px;letter-spacing:1px">PRINT SHIPPING LABEL</a>
+
+<p style="font-size:11px;color:#999;margin-top:16px">This email was sent automatically by Bloom Daily. <a href="https://jpresso-checkout.onrender.com/admin?key={ADMIN_KEY}" style="color:#4E1F73">View all orders</a></p>
+</div>
+</div>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"Bloom Daily Orders <{GMAIL_USER}>"
+        msg["To"] = NOTIFY_EMAIL
+        msg.attach(MIMEText(f"New Order #{order_id}\nCustomer: {name}\nEmail: {email}\nTotal: RM{amount:.2f}\nAddress: {address_str}\n\nItems:\n{items_text}\nPrint label: {label_url}", "plain"))
+        msg.attach(MIMEText(body_html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_USER, NOTIFY_EMAIL, msg.as_string())
+
+        print(f"[EMAIL] Sent order notification #{order_id} to {NOTIFY_EMAIL}")
+
+    except Exception as e:
+        print(f"[EMAIL] Failed: {str(e)}")
 
 
 def get_or_create_customer(email):
@@ -77,7 +171,7 @@ def create_checkout_session():
             unit_amount = int(float(item["price"]) * 100)
             line_items.append({"price_data": {"currency": "myr", "unit_amount": unit_amount, "product_data": {"name": item["name"], "description": item.get("description", "")}}, "quantity": item["quantity"]})
         shipping_options = get_shipping_options(items)
-        session_params = {"payment_method_types": ["card"], "line_items": line_items, "mode": "payment", "success_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?success=true", "cancel_url": "https://www.jpressocoffee.com/jpresso-subscribe.html?cancelled=true", "shipping_address_collection": {"allowed_countries": ["MY"]}, "shipping_options": shipping_options}
+        session_params = {"payment_method_types": ["card"], "line_items": line_items, "mode": "payment", "success_url": f"{RETURN_PAGE}?success=true", "cancel_url": f"{RETURN_PAGE}?cancelled=true", "shipping_address_collection": {"allowed_countries": ["MY"]}, "shipping_options": shipping_options}
         if customer_email:
             customer = get_or_create_customer(customer_email)
             session_params["customer"] = customer.id
@@ -110,7 +204,7 @@ def create_subscription_session():
         price_id = SUBSCRIPTION_PRICES.get(plan_id)
         if not price_id or "REPLACE" in price_id:
             return jsonify({"error": f"Subscription '{plan_id}' not configured."}), 400
-        session = stripe.checkout.Session.create(payment_method_types=["card"], line_items=[{"price": price_id, "quantity": 1}], mode="subscription", success_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=success", cancel_url="https://www.jpressocoffee.com/jpresso-subscribe.html?sub=cancelled")
+        session = stripe.checkout.Session.create(payment_method_types=["card"], line_items=[{"price": price_id, "quantity": 1}], mode="subscription", success_url=f"{RETURN_PAGE}?sub=success", cancel_url=f"{RETURN_PAGE}?sub=cancelled")
         return jsonify({"url": session.url})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -127,7 +221,7 @@ def create_portal_session():
         if not customers.data:
             return jsonify({"error": "No account found with this email."}), 404
         customer = customers.data[0]
-        session = stripe.billing_portal.Session.create(customer=customer.id, return_url="https://www.jpressocoffee.com/jpresso-subscribe.html")
+        session = stripe.billing_portal.Session.create(customer=customer.id, return_url=RETURN_PAGE)
         return jsonify({"url": session.url})
     except stripe.error.StripeError as e:
         return jsonify({"error": str(e)}), 400
@@ -147,8 +241,9 @@ def stripe_webhook():
     except (ValueError, stripe.error.SignatureVerificationError) as e:
         return jsonify({"error": str(e)}), 400
     if event.get("type") == "checkout.session.completed":
-        s = event["data"]["object"]
-        print(f"[ORDER] New: {s.get('id')} | {s.get('customer_details', {}).get('email', 'N/A')} | RM{s.get('amount_total', 0) / 100:.2f}")
+        session_data = event["data"]["object"]
+        print(f"[ORDER] New: {session_data.get('id')} | {session_data.get('customer_details', {}).get('email', 'N/A')} | RM{session_data.get('amount_total', 0) / 100:.2f}")
+        send_order_email(session_data)
     return jsonify({"status": "ok"}), 200
 
 
@@ -226,12 +321,12 @@ th:last-child {{ text-align:center }}
 </style></head><body>
 <div class="ctr no-print"><button class="btn" onclick="window.print()">Print Shipping Label</button><br><br></div>
 <div class="label">
-<div class="hdr"><div class="logo">JPRESSO</div><div class="oid"><strong>#{order_id}</strong>{order_date}</div></div>
+<div class="hdr"><div class="logo">BLOOM DAILY</div><div class="oid"><strong>#{order_id}</strong>{order_date}</div></div>
 <div class="stitle">Ship To</div>
 <div class="addr"><div class="nm">{name}</div>{line1}<br>{(line2 + '<br>') if line2 else ''}{postal} {city}, {state}<br>Malaysia{('<br>Tel: ' + phone) if phone else ''}{('<br>' + email) if email else ''}</div>
 <div class="stitle">Items ordered</div>
 <table><tr><th>Product</th><th>Qty</th></tr>{items_rows}</table>
-<div class="from"><strong>From:</strong> Big Jpresso Sdn Bhd | 29, Jalan Tembaga SD 5/2C, Bandar Sri Damansara, 52200 KL<br>Tel: +60 12-878 2876 | hello@jpressocoffee.com</div>
+<div class="from"><strong>From:</strong> Big Jpresso Sdn Bhd | 29, Jalan Tembaga SD 5/2C, Bandar Sri Damansara, 52200 KL<br>Tel: +60 12-878 2876 | hello@bloomdaily.io</div>
 </div></body></html>"""
     except Exception as e:
         return f"Error: {str(e)}", 500
@@ -247,7 +342,7 @@ def admin_page():
 
 ADMIN_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Jpresso Admin - Orders</title>
+<title>Bloom Daily Admin - Orders</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f8f5f1;color:#2D1145}
@@ -283,7 +378,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#f8f5f1;color:#2D1145}
 .bg-p{background:#e6f5ec;color:#16a34a}
 .bg-s{background:#f3edf8;color:#6B3A94}
 </style></head><body>
-<div class="nav"><h1>JPRESSO ADMIN</h1><span>Orders & Shipping Labels</span></div>
+<div class="nav"><h1>BLOOM DAILY ADMIN</h1><span>Orders & Shipping Labels</span></div>
 <div class="ct">
 <div class="ctl">
 <select id="lim"><option value="10">Last 10</option><option value="20" selected>Last 20</option><option value="50">Last 50</option></select>
