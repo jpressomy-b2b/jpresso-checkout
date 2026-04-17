@@ -114,41 +114,110 @@ def get_or_create_customer(email):
 
 
 def get_shipping_options(items):
+    """Calculate shipping using SPX rate card.
+    Roasted beans: SPX rate based on max(actual_weight, volumetric_min)
+    Green beans: weight-tiered bulk shipping
+    Equipment: added to roasted weight
+    """
+    import math
+
+    # SPX rate table (incl SST, West Malaysia)
+    def spx_rate(kg):
+        kg = max(1, math.ceil(kg))
+        if kg <= 2:
+            return 6.89
+        elif kg <= 30:
+            return 6.0 + kg
+        else:
+            return 36.0  # cap at 30kg
+
+    # Volumetric minimums per roastery (kg)
+    VOL_MIN = {
+        "Jpresso Roastery": 2,  # box 26x15x23cm = 1.79kg vol
+        "LewisGene": 3,         # 3kg volumetric minimum
+        "Richman": 2,            # default
+    }
+
     green_kg = 0
-    has_non_green = False
+    roasted_weight_g = 0
+    equip_weight_g = 0
+    roastery_set = set()
+
     for item in items:
-        if item.get("type") == "green":
-            green_kg += item.get("quantity", 1)
+        item_type = item.get("type", "roasted")
+        qty = item.get("quantity", 1)
+
+        if item_type == "green":
+            green_kg += qty  # green qty is already in kg
+        elif item_type == "equip":
+            equip_weight_g += 2000 * qty  # estimate 2kg per equipment item
         else:
-            has_non_green = True
-    if green_kg == 0:
-        return [
-            {"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": 0, "currency": "myr"}, "display_name": "Free Shipping (Peninsular MY)", "delivery_estimate": {"minimum": {"unit": "business_day", "value": 3}, "maximum": {"unit": "business_day", "value": 5}}}},
-            {"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": 1500, "currency": "myr"}, "display_name": "East Malaysia (Sabah & Sarawak) - RM15", "delivery_estimate": {"minimum": {"unit": "business_day", "value": 5}, "maximum": {"unit": "business_day", "value": 10}}}},
-        ]
-    if green_kg >= 60:
-        pen_amount, pen_label = 0, f"Free Shipping (Peninsular MY) - {green_kg}kg"
-    elif green_kg >= 30:
-        pen_amount, pen_label = 6000, f"Peninsular MY - RM60 ({green_kg}kg)"
-    elif green_kg >= 10:
-        pen_amount, pen_label = 4000, f"Peninsular MY - RM40 ({green_kg}kg)"
-    elif green_kg >= 5:
-        pen_amount, pen_label = 2500, f"Peninsular MY - RM25 ({green_kg}kg)"
-    else:
-        pen_amount, pen_label = 1500, f"Peninsular MY - RM15 ({green_kg}kg)"
-    options = [{"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": pen_amount, "currency": "myr"}, "display_name": pen_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 3}, "maximum": {"unit": "business_day", "value": 7}}}}]
-    if green_kg < 30:
-        if green_kg >= 10:
-            em_amount, em_label = 15000, f"East Malaysia - RM150 ({green_kg}kg)"
+            # Roasted bean - get weight from weight_g field or parse from description
+            weight_g = item.get("weight_g", 0)
+            if not weight_g:
+                desc = item.get("description", "")
+                if "500g" in desc or "500G" in desc:
+                    weight_g = 500
+                elif "250g" in desc or "250G" in desc:
+                    weight_g = 250
+                else:
+                    weight_g = 250  # default
+            roasted_weight_g += weight_g * qty
+            roastery_name = item.get("roastery", "")
+            if roastery_name:
+                roastery_set.add(roastery_name)
+
+    # --- GREEN BEAN SHIPPING (bulk, separate logic) ---
+    if green_kg > 0 and roasted_weight_g == 0 and equip_weight_g == 0:
+        if green_kg >= 60:
+            pen_amount, pen_label = 0, f"Free Shipping (Peninsular MY) - {green_kg}kg"
+        elif green_kg >= 30:
+            pen_amount, pen_label = 6000, f"Peninsular MY - RM60 ({green_kg}kg)"
+        elif green_kg >= 10:
+            pen_amount, pen_label = 4000, f"Peninsular MY - RM40 ({green_kg}kg)"
         elif green_kg >= 5:
-            em_amount, em_label = 8000, f"East Malaysia - RM80 ({green_kg}kg)"
+            pen_amount, pen_label = 2500, f"Peninsular MY - RM25 ({green_kg}kg)"
         else:
-            em_amount, em_label = 5000, f"East Malaysia - RM50 ({green_kg}kg)"
-        options.append({"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": em_amount, "currency": "myr"}, "display_name": em_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 5}, "maximum": {"unit": "business_day", "value": 10}}}})
-    else:
-        options.append({"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": 0, "currency": "myr"}, "display_name": "East Malaysia (30kg+) - Contact us for quote", "delivery_estimate": {"minimum": {"unit": "business_day", "value": 7}, "maximum": {"unit": "business_day", "value": 14}}}})
-    if has_non_green:
-        options[0]["shipping_rate_data"]["display_name"] += " + roasted/equipment"
+            pen_amount, pen_label = 1500, f"Peninsular MY - RM15 ({green_kg}kg)"
+        options = [{"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": pen_amount, "currency": "myr"}, "display_name": pen_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 3}, "maximum": {"unit": "business_day", "value": 7}}}}]
+        if green_kg < 30:
+            if green_kg >= 10:
+                em_amount, em_label = 15000, f"East Malaysia - RM150 ({green_kg}kg)"
+            elif green_kg >= 5:
+                em_amount, em_label = 8000, f"East Malaysia - RM80 ({green_kg}kg)"
+            else:
+                em_amount, em_label = 5000, f"East Malaysia - RM50 ({green_kg}kg)"
+            options.append({"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": em_amount, "currency": "myr"}, "display_name": em_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 5}, "maximum": {"unit": "business_day", "value": 10}}}})
+        return options
+
+    # --- ROASTED / EQUIPMENT SHIPPING (SPX rate card) ---
+    actual_kg = (roasted_weight_g + equip_weight_g) / 1000.0
+
+    # Get volumetric minimum from roastery (use highest if mixed)
+    vol_min = 2  # default
+    for r in roastery_set:
+        vol_min = max(vol_min, VOL_MIN.get(r, 2))
+
+    chargeable_kg = max(actual_kg, vol_min)
+    rate = spx_rate(chargeable_kg)
+    rate_sen = round(rate * 100)
+    chargeable_rounded = max(1, math.ceil(chargeable_kg))
+
+    # Add green bean weight if mixed order
+    if green_kg > 0:
+        chargeable_kg_total = chargeable_kg + green_kg
+        rate_total = spx_rate(chargeable_kg_total)
+        rate_sen = round(rate_total * 100)
+        chargeable_rounded = max(1, math.ceil(chargeable_kg_total))
+
+    pen_label = f"SPX West Malaysia - RM{rate_sen/100:.2f} ({chargeable_rounded}kg)"
+    options = [{"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": rate_sen, "currency": "myr"}, "display_name": pen_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 3}, "maximum": {"unit": "business_day", "value": 5}}}}]
+
+    # East Malaysia: SPX rate × 2 (approximate)
+    em_rate_sen = round(rate_sen * 2)
+    em_label = f"SPX East Malaysia - RM{em_rate_sen/100:.2f} ({chargeable_rounded}kg)"
+    options.append({"shipping_rate_data": {"type": "fixed_amount", "fixed_amount": {"amount": em_rate_sen, "currency": "myr"}, "display_name": em_label, "delivery_estimate": {"minimum": {"unit": "business_day", "value": 5}, "maximum": {"unit": "business_day", "value": 10}}}})
+
     return options
 
 
